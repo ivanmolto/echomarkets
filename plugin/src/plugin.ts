@@ -13,7 +13,7 @@ import { proposeX402, x402OutputSchema } from "./paybox.js";
 const PROTOCOL_VERSION = "2026-07-28";
 
 // ---- configuration (non-sensitive; override with portal env vars) -----------------------
-const ECHO_BASE = (process.env.ECHO_BASE ?? "https://echomarkets.xyz").replace(/\/$/, "");
+const ECHO_BASE = (process.env.ECHO_BASE ?? "https://www.echomarkets.xyz").replace(/\/$/, "");
 // Fixed, not env-configurable: PayBox checks this against the server's 402, which accepts Solana only.
 // Add Base here only once the server lists it in `accepts` too.
 const CHAIN = "solana:mainnet" as const;
