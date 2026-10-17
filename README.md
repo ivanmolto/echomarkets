@@ -11,7 +11,7 @@
 
 <p align="center">
   <a href="https://www.echomarkets.xyz">Website</a> ·
-  <a href="https://x.com/ivanmolto/status/2094423802406908342">Demo video</a> ·
+  <a href="https://youtu.be/pezbIIMvXMM">Demo video</a> ·
   <a href="https://www.echomarkets.xyz/api/templates">Live API</a> ·
   <a href="https://developer.paybox.sh/">MoonPay Hackathons · Chapter 1</a>
 </p>
