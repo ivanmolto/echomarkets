@@ -230,16 +230,22 @@ function createServer() {
         threshold: z.number().min(0).max(1).optional().describe("signal-follow: minimum confidence 0..1"),
         drop_pct: z.number().min(0.5).max(50).optional().describe("mean-reversion: trigger drop in percent"),
         hours: z.number().int().min(1).max(168).optional().describe("Run length in hours"),
+        feed_url: z.string().url().max(500).optional().describe("event-trigger: public JSON feed to watch (default: USGS earthquakes)"),
+        window_start: z.string().datetime({ offset: true }).optional().describe("event-trigger: ISO 8601 start of the active window (default: now)"),
+        window_end: z.string().datetime({ offset: true }).optional().describe("event-trigger: ISO 8601 end of the active window (default: none)"),
       }).strict(),
       outputSchema: x402OutputSchema,
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     },
-    async ({ template, market, outcome, size_usd, threshold, drop_pct, hours }) => {
+    async ({ template, market, outcome, size_usd, threshold, drop_pct, hours, feed_url, window_start, window_end }) => {
       const body: Record<string, string | number> = { market: market.trim(), outcome };
       if (size_usd !== undefined) body.size_usd = size_usd;
       if (threshold !== undefined) body.threshold = threshold;
       if (drop_pct !== undefined) body.drop_pct = drop_pct;
       if (hours !== undefined) body.hours = hours;
+      if (feed_url !== undefined) body.feed_url = feed_url;
+      if (window_start !== undefined) body.window_start = window_start;
+      if (window_end !== undefined) body.window_end = window_end;
       log("proposing template", template, "for", body.market);
       return proposeX402({ chain: CHAIN, url: `${ECHO_BASE}/api/templates/${template}`, maxAmount: PRICE_TEMPLATE, method: "POST", body });
     },
@@ -266,7 +272,7 @@ function createServer() {
         chain: CHAIN,
         templates: [
           { slug: "signal-follow", description: "Polls the EchoMarkets signal; buys when confidence ≥ threshold. Simulates first; budget-aware.", params: ["market", "outcome", "threshold", "size_usd", "hours"] },
-          { slug: "event-trigger", description: "Sleeps until a window, watches an external JSON feed, buys when the condition fires.", params: ["market", "outcome", "size_usd", "hours"] },
+          { slug: "event-trigger", description: "Sleeps until a window, watches an external JSON feed, buys when the condition fires.", params: ["market", "outcome", "feed_url", "window_start", "window_end", "size_usd", "hours"] },
           { slug: "mean-reversion", description: "Buys when the outcome price drops more than drop_pct from the recent baseline.", params: ["market", "outcome", "drop_pct", "size_usd", "hours"] },
         ],
         run: "dawn strategy launch <file>.py --name <run>   # paper mode by default; add --live --budget N for real funds",
