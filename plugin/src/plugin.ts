@@ -25,6 +25,12 @@ const GAMMA = "https://gamma-api.polymarket.com";
 const CLOB = "https://clob.polymarket.com";
 const FETCH_TIMEOUT_MS = 4000;
 
+// search_markets ranking: events to pull from Gamma search before ranking by liquidity,
+// and what counts as "still tradeable" (not resolving within N hours, price not pinned to 0/1).
+const SEARCH_OVERFETCH = 10;
+const MIN_HOURS_TO_RESOLUTION = 3;
+const MIN_TRADEABLE_PRICE = 0.02;
+
 // ---- helpers ------------------------------------------------------------------------------
 function log(...a: unknown[]) { console.error("[echomarkets]", ...a); }
 
@@ -120,22 +126,34 @@ function createServer() {
     },
     async ({ query, limit }) => {
       // /markets ignores free-text filters; /public-search returns matching events with nested markets.
+      // Over-fetch (search ranks by recency, which favours near-resolved daily ladders), then rank ourselves.
       const res = await getJson<{ events?: { markets?: GammaMarket[] }[] }>(
-        `${GAMMA}/public-search?q=${encodeURIComponent(query)}&limit_per_type=${limit}&events_status=active`,
+        `${GAMMA}/public-search?q=${encodeURIComponent(query)}&limit_per_type=${SEARCH_OVERFETCH}&events_status=active`,
       );
       const rows = (res.events ?? [])
         .flatMap(e => e.markets ?? [])
-        .filter(m => m.slug && m.closed !== true && m.active !== false);
-      const markets = rows.slice(0, limit).map(m => {
-        const prices = parseArray(m.outcomePrices);
-        return {
-          slug: String(m.slug),
-          question: String(m.question ?? ""),
-          yesPrice: num(prices[0], null),
-          liquidityUsd: num(m.liquidityNum ?? m.liquidity, 0),
-          endDate: (m.endDate as string | undefined) ?? null,
-        };
-      });
+        .filter(m => m.slug && m.closed !== true && m.active !== false)
+        .map(m => {
+          const prices = parseArray(m.outcomePrices);
+          return {
+            slug: String(m.slug),
+            question: String(m.question ?? ""),
+            yesPrice: num(prices[0], null),
+            liquidityUsd: num(m.liquidityNum ?? m.liquidity, 0),
+            endDate: (m.endDate as string | undefined) ?? null,
+          };
+        })
+        .sort((a, b) => b.liquidityUsd - a.liquidityUsd);
+      // Prefer markets with something left to trade: not about to resolve, price not already at 0 or 1.
+      // Fall back to the rest so a thin query still returns what exists.
+      const minEnd = Date.now() + MIN_HOURS_TO_RESOLUTION * 3_600_000;
+      const tradeable = (m: typeof rows[number]) => {
+        const end = m.endDate ? Date.parse(m.endDate) : NaN;
+        if (Number.isFinite(end) && end < minEnd) return false;
+        if (m.yesPrice !== null && (m.yesPrice < MIN_TRADEABLE_PRICE || m.yesPrice > 1 - MIN_TRADEABLE_PRICE)) return false;
+        return true;
+      };
+      const markets = [...rows.filter(tradeable), ...rows.filter(m => !tradeable(m))].slice(0, limit);
       const text = markets.length
         ? markets.map(m => `• ${m.question} — yes ${m.yesPrice ?? "?"} · liq $${Math.round(m.liquidityUsd).toLocaleString()} · slug ${m.slug}`).join("\n")
         : `No active markets matched "${query}".`;
