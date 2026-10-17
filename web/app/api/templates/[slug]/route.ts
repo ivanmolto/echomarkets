@@ -45,8 +45,9 @@ export async function POST(req: Request, ctx: { params: Promise<{ slug: string }
       market: { slug: market.slug, question: market.question, outcome: market.outcomes[outcomeIndex] },
       filename,
       signal_token_expires_in_hours: 24,
-      run: `dawn strategy launch ${filename} --name ${slug}-demo`,
-      run_live: `dawn strategy launch ${filename} --name ${slug}-live --live --budget 20`,
+      run: `dawn strategy launch ${filename} --name ${slug}-demo --budget 20`,
+      run_live: `dawn strategy launch ${filename} --name ${slug}-live --budget 20 --live`,
+      budget_note: '--budget is required by Dawn: a server-enforced cap on cumulative buys for the run (paper or live)',
       python: py,
     })
   } catch (e) {

@@ -2,8 +2,18 @@
 //
 // Output must be "runnable Python with the Dawn SDK installed" (Dawn imposes nothing else).
 // House style per Dawn docs: structured JSON logs, simulate before buy, respect read_budget(),
-// sleep through irrelevant hours. Verify names against `dawn tool docs prediction_market` on day one —
-// the import list below is the one shown on cli.dawn.ai/docs/strategies.
+// sleep through irrelevant hours, terminate_strategy() when done.
+//
+// Aligned with dawnai-sdk 1.0.0 (`dawn tool docs prediction_market` / `portfolio`):
+//   prediction_market_simulate_buy(token_id, usd_amount) -> SimulateTradeResult
+//       .average_price .tokens_traded .price_impact_percent (percent, may be None) .error
+//   prediction_market_buy_token(token_id, amount) -> BuyTokenResult   (no slippage parameter)
+//       .result.success .result.executed_price .result.executed_amount .error
+//   get_prediction_market_prices(market_id) -> .prices[token_id].BUY (best bid) / .SELL (best ask)
+//   read_budget() -> .cap .spent .remaining (Decimal)
+//   read_portfolio() -> .wallet.positions[]
+// All responses are Pydantic models; _get() reads attributes or dict keys so either shape works.
+// `dawn strategy launch` requires --name and --budget (server-enforced cap on cumulative buys).
 
 import type { Market } from './polymarket'
 
@@ -70,8 +80,9 @@ function header(input: GenInput, title: string) {
 #
 # No Dawn yet?           npm i -g @dawnai/cli && dawn start
 # First time only:       dawn consent accept && dawn auth login
-# Run (paper, default):  dawn strategy launch ${input.slug}.py --name ${input.slug}-${m.slug.slice(0, 24)}
-# Run (live):            ... --live --budget 20        (needs: dawn wallet use <name>; POL funded via dawn wallet fund)
+# Run (paper, default):  dawn strategy launch ${input.slug}.py --name ${input.slug}-${m.slug.slice(0, 24)} --budget 20
+# Run (live):            ... --live                     (needs: dawn wallet use <name>; POL funded via dawn wallet fund)
+# --budget is required: a server-enforced cap on cumulative buys; buys past it fail with would_exceed_budget.
 # Watch:                 dawn strategy logs <run_id> --tail 50
 # Stop:                  dawn strategy stop <run_id>   (stopping never sells positions)
 #
@@ -83,16 +94,18 @@ import urllib.request
 from datetime import datetime, timezone
 from decimal import Decimal
 from dawnai.strategy.tools import (
-    get_polymarket_prices,
-    polymarket_simulate_buy,
-    polymarket_buy_token,
+    get_prediction_market_prices,
+    prediction_market_simulate_buy,
+    prediction_market_buy_token,
     read_portfolio,
     read_budget,
+    terminate_strategy,
 )
 
 ECHO_BASE = ${JSON.stringify(input.baseUrl)}
 ECHO_TOKEN = ${JSON.stringify(input.signalToken)}
 MARKET = ${JSON.stringify(m.slug)}
+MARKET_ID = ${JSON.stringify(m.id)}
 OUTCOME_INDEX = ${input.outcomeIndex}
 TOKEN_ID = ${JSON.stringify(m.tokenIds[input.outcomeIndex])}
 
@@ -120,35 +133,41 @@ def headroom_ok(size_usd):  # noqa: E302  (uses _get defined below; Python resol
     return True
 
 
-MIN_BUY_USD = Decimal("1.01")        # Polymarket minimum; anything less is rejected before chain
-MAX_PRICE_IMPACT = Decimal("0.01")   # 1% — if simulate_buy shows more, bumping slippage only buys a worse fill
-SLIPPAGE_BPS = 100                   # Dawn default; bounds worst-case fill, trade reverts if the book moves more
+MIN_BUY_USD = Decimal("1.01")            # Polymarket minimum; anything less is rejected before chain
+MAX_PRICE_IMPACT_PCT = Decimal("1.0")    # percent — if simulate_buy shows more, a bigger order only buys a worse fill
 
 
 def _get(obj, key, default=None):
-    """SDK results may be dicts or objects; read either."""
+    """SDK results are Pydantic models (attributes); tolerate dicts too."""
+    if obj is None:
+        return default
     if isinstance(obj, dict):
         return obj.get(key, default)
     return getattr(obj, key, default)
 
 
 def guarded_buy(size_usd):
+    """Simulate, gate on price impact, then buy. Returns the BuyTokenResult on success, else None."""
     if size_usd < MIN_BUY_USD:
         log(event="skip", reason="below_min_buy", size=str(size_usd), min=str(MIN_BUY_USD))
         return None
-    sim = polymarket_simulate_buy(TOKEN_ID, size_usd)
-    if _get(sim, "success", True) is False:
-        log(event="skip", reason="simulate_failed", detail=_get(sim, "error") or _get(sim, "message"))
+    sim = prediction_market_simulate_buy(TOKEN_ID, size_usd)
+    sim_error = _get(sim, "error")
+    if sim_error:
+        log(event="skip", reason="simulate_failed", detail=str(sim_error))
         return None
-    impact = _get(sim, "price_impact")
-    avg_price = _get(sim, "expected_average_price") or _get(sim, "executed_price")
-    log(event="simulate", size=str(size_usd), avg_price=avg_price, price_impact=impact)
-    if impact is not None and Decimal(str(impact)) > MAX_PRICE_IMPACT:
-        log(event="skip", reason="price_impact", impact=impact, max=str(MAX_PRICE_IMPACT))
+    impact = _get(sim, "price_impact_percent")
+    avg_price = _get(sim, "average_price")
+    log(event="simulate", size=str(size_usd), avg_price=avg_price, tokens=_get(sim, "tokens_traded"), price_impact_pct=impact)
+    if impact is not None and Decimal(str(impact)) > MAX_PRICE_IMPACT_PCT:
+        log(event="skip", reason="price_impact", impact_pct=impact, max_pct=str(MAX_PRICE_IMPACT_PCT))
         return None
-    res = polymarket_buy_token(TOKEN_ID, size_usd, slippage_bps=SLIPPAGE_BPS)
-    log(event="buy", size=str(size_usd), avg_price=avg_price, result=res)
-    return res
+    res = prediction_market_buy_token(TOKEN_ID, size_usd)
+    order = _get(res, "result")
+    ok = bool(_get(order, "success", False))
+    log(event="buy", success=ok, size=str(size_usd), executed_price=_get(order, "executed_price"),
+        executed_amount=_get(order, "executed_amount"), order_id=_get(order, "order_id"), error=_get(res, "error"))
+    return res if ok else None
 
 
 # Register this run with Dawn's API early so it shows in the dashboard (local paper runs only
@@ -174,8 +193,13 @@ for i in range(ITERATIONS):
         run_once(i)
     except Exception as exc:
         log(event="error", iter=i, error=repr(exc))
-    time.sleep(INTERVAL_MINUTES * 60)
+    if i < ITERATIONS - 1:
+        time.sleep(INTERVAL_MINUTES * 60)
 log(event="done")
+try:
+    terminate_strategy()  # tells Dawn the run finished; positions are kept (never auto-liquidated)
+except Exception as exc:
+    log(event="terminate_error", error=repr(exc))
 `
 }
 
@@ -267,14 +291,21 @@ buys_done = 0
 
 
 def current_price():
-    prices = get_polymarket_prices(TOKEN_ID)
-    return Decimal(str(_get(prices, "prices", {})[TOKEN_ID]["BUY"]))
+    """Best ask for our token (what a buy pays). None when the market is closed or the token is missing."""
+    resp = get_prediction_market_prices(MARKET_ID)
+    entry = (_get(resp, "prices") or {}).get(TOKEN_ID)
+    if entry is None:
+        log(event="idle", reason="no_price", error=_get(resp, "error"))
+        return None
+    return Decimal(str(_get(entry, "SELL")))
 
 
 def run_once(i):
     global buys_done
     now = time.time()
     p = current_price()
+    if p is None:
+        return
     history.append((now, p))
     cutoff = now - LOOKBACK_MINUTES * 60
     while history and history[0][0] < cutoff:
