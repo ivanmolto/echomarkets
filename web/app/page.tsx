@@ -7,6 +7,7 @@ import s from "./page.module.css";
 
 const BASE = process.env.NEXT_PUBLIC_BASE_URL ?? "https://www.echomarkets.xyz";
 const X_POST = process.env.NEXT_PUBLIC_X_POST ?? ""; // set after the demo video is posted
+const DEMO_VIDEO = "https://youtu.be/pezbIIMvXMM";
 const REPO = "https://github.com/ivanmolto/echomarkets";
 const X_PROFILE = "https://x.com/echo_markets";
 const PAYBOX_PLUGINS = "https://app.paybox.sh/plugins";
@@ -503,11 +504,9 @@ export default function Home() {
             </a>
           </span>
           <nav>
-            {X_POST && (
-              <a href={X_POST} target="_blank" rel="noopener noreferrer">
-                Demo video
-              </a>
-            )}
+            <a href={DEMO_VIDEO} target="_blank" rel="noopener noreferrer">
+              Demo video
+            </a>
             <a
               href={REPO}
               target="_blank"
