@@ -275,7 +275,7 @@ function createServer() {
           { slug: "event-trigger", description: "Sleeps until a window, watches an external JSON feed, buys when the condition fires.", params: ["market", "outcome", "feed_url", "window_start", "window_end", "size_usd", "hours"] },
           { slug: "mean-reversion", description: "Buys when the outcome price drops more than drop_pct from the recent baseline.", params: ["market", "outcome", "drop_pct", "size_usd", "hours"] },
         ],
-        run: "dawn strategy launch <file>.py --name <run>   # paper mode by default; add --live --budget N for real funds",
+        run: "dawn strategy launch <file>.py --name <run> --budget 20   # paper mode by default; add --live for real funds",
       };
       const text = out.templates.map(t => `• ${t.slug} — ${t.description}`).join("\n") + `\nBrief 0.02 USDC · Template 0.10 USDC · ${CHAIN}`;
       return { content: [{ type: "text", text }], structuredContent: out };
