@@ -56,7 +56,7 @@ Dawn strategy ──Bearer token (24h, HMAC)──▶ GET /api/signal/{market}  
 2. Ask your agent. Search and preview are free.
 3. Approve the 2¢ or 10¢ payment when PayBox shows it.
 4. The brief, or a personalised strategy file, lands in chat.
-5. Run the strategy in Dawn (paper mode by default): `dawn strategy launch file.py --name demo`
+5. Run the strategy in Dawn (paper mode by default): `dawn strategy launch file.py --name demo --budget 20`
 
 No plugin? Paste this into any agent with a PayBox wallet:
 
@@ -82,7 +82,7 @@ It is computed from live Polymarket order books: spread, liquidity, price band a
 
 ## Strategy templates
 
-Each template is generated for one market and one outcome, ships with a 24-hour signal token, simulates before it buys, gates on price impact and respects the Dawn budget. Paper mode by default; `--live --budget N` for real funds.
+Each template is generated for one market and one outcome, ships with a 24-hour signal token, simulates before it buys, gates on price impact and respects the Dawn budget. Paper mode by default; add `--live` for real funds. `--budget N` is always required and caps cumulative buys server-side.
 
 | Template | Does | Parameters |
 |---|---|---|
